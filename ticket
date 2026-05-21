@@ -1,0 +1,350 @@
+import discord
+from discord.ext import commands
+from discord.ui import Button, View, Modal, TextInput
+import asyncio
+import sys
+import threading
+
+# --- CONFIGURATION (SAVED) ---
+GUILD_ID = 1379011391494557706          
+TICKET_CATEGORY_ID = 1507021013811073084 
+BOT_TOKEN = "MTUwNDkwMjMxNjcyNDMyMjQ3OA.GXB6zi.PcA8Z0JdXvSEXnELSVVpGa5wx6YQZ_NxtJohwk"    
+
+# --- SECURITY: ADD ALLOWED DISCORD USER IDs HERE ---
+ALLOWED_USER_IDS = [
+    1007660346292580413,  # Replace with your actual Discord User ID
+    1238133736134934634   # You can add more staff IDs separated by commas
+]
+
+class TicketBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.guilds = True
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def on_ready(self):
+        print(f"\n[SYSTEM] Logged in as {self.user.name}")
+        print("[SYSTEM] Interactive Terminal Menu is ready. Type 'help' to see commands.\n")
+        self.add_view(TicketCornerView())
+
+bot = TicketBot()
+
+
+# --- CUSTOM ID + ADMIN CHECK ---
+def is_admin_or_allowed_id():
+    async def predicate(ctx):
+        has_admin = ctx.author.guild_permissions.administrator
+        is_allowed_id = ctx.author.id in ALLOWED_USER_IDS
+        return has_admin and is_allowed_id
+    return commands.check(predicate)
+
+
+# --- COMBINED SAY HELPER FUNCTION ---
+async def send_combined_message(target, content_str):
+    """Parses and sends text, embed, and image from a single combined string."""
+    sections = content_str.split("||")
+    
+    plain_text = sections[0].strip() if len(sections) > 0 else ""
+    embed_section = sections[1].strip() if len(sections) > 1 else ""
+    image_url = sections[2].strip() if len(sections) > 2 else ""
+
+    kwargs = {}
+    if plain_text:
+        kwargs["content"] = plain_text
+
+    if embed_section or image_url:
+        title, desc, color_str = "", "", "2f3136"
+        
+        if embed_section:
+            parts = [p.strip() for p in embed_section.split("|")]
+            title = parts[0]
+            desc = parts[1] if len(parts) > 1 else ""
+            if len(parts) > 2:
+                color_str = parts[2].replace("#", "")
+
+        try:
+            embed_color = int(color_str, 16)
+        except ValueError:
+            embed_color = 0x2f3136
+
+        embed = discord.Embed(color=embed_color)
+        if title:
+            embed.title = title
+        if desc:
+            embed.description = desc
+        if image_url:
+            embed.set_image(url=image_url)
+            
+        kwargs["embed"] = embed
+
+    if kwargs:
+        await target.send(**kwargs)
+        return True
+    return False
+
+
+# --- SECURE ALL-IN-ONE SAY COMMAND ---
+@bot.command()
+@is_admin_or_allowed_id()
+async def say(ctx, *, content: str = None):
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
+
+    if not content:
+        err = await ctx.send("❌ **Usage:** `!say text || Title | Desc | #HEX || img_url`\n*Leave sections empty if not needed!*")
+        await asyncio.sleep(6)
+        await err.delete()
+        return
+
+    await send_combined_message(ctx.channel, content)
+
+
+# --- SECURE SETUP PANEL COMMAND ---
+@bot.command()
+@is_admin_or_allowed_id()
+async def setuptickets(ctx):
+    menu_text = (
+        "‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎\n"
+        "               <:99_pinbow:1502654603928535130>   Tℹcket  **corner  **!\n\n"
+        " ‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎        ‎ ━━━━━━━━━━━━   <:shy:1386373538495332473> \n\n"
+        "                  <:10_heart:1500183402341470333>     **order** \n"
+        "-# **               **       place  an  o__rder__\n\n"
+        "                   <:10_heart:1500183402341470333>    **rprts**\n"
+        "-# **               **       __repor__ting  items\n\n"
+        " ‎ ‎ ‎ ‎ ‎        <:shy:1394527446874722395>  ‎ ━━━━━━━━━━━━\n\n"
+        "                     <:8_ballerina:1502656549888331929>   Nøte  !!\n\n"
+        "-# **      **       do not place an order if **unsure**.\n"
+        "-# **      **       make sure to **read** [⁠rules﹒✿](https://discord.com/channels/1379011391494557706/1379011864788205689)﻿﻿\n"
+        "-# **      **       ask **availability** before placing an order!\n"
+        "‎ ‎ ‎ ‎ ‎ ‎ ‎ ‎"
+    )
+    
+    await ctx.send(content=menu_text, view=TicketCornerView())
+    await ctx.message.delete()
+
+
+# --- ERROR HANDLING FOR UN-AUTHORIZED USERS (PLACED AFTER COMMANDS) ---
+@say.error
+@setuptickets.error
+async def security_error_handler(ctx, error):
+    if isinstance(error, commands.CheckFailure):
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass
+
+
+# --- AUTOMATIC GCASH RESPONDER ---
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if isinstance(message.channel, discord.TextChannel) and message.channel.category_id == TICKET_CATEGORY_ID:
+        if "gcash" in message.content.lower():
+            payment_message = (
+                "_ _\n"
+                " ‎ ‎ ‎ ‎ ‎ ‎ <:8_ballerina:1502656549888331929>‎ ‎ ‎ ‎ ‎ ⌒‎ ‎ ‎ ﹒‎ 𝓁uv‎ ‎ ‎ ‎gcash!\n"
+                "‎ ‎\n"
+                "‎ ‎ ‎ ‎‎‎ ‎ ‎ <:99_pinbow:1502654603928535130> Barrow ﹕‎ ‎  09274005450 \n"
+                "‎ ‎ ‎ ‎\n"
+                "‎ ‎ ‎ ‎ Play ‎ ‎ ‎ <:10_heart:1500183402341470333>‎ ‎Y‎ <:10_heart:1500183402341470333>‎ M‎ <:10_heart:1500183402341470333>‎ T"
+            )
+            await message.channel.send(content=payment_message)
+
+    await bot.process_commands(message)
+
+
+# --- TERMINAL INTERFACE LOGIC ---
+def start_terminal_loop(loop):
+    while True:
+        try:
+            cmd_input = input("Bot-Terminal> ").strip().split()
+            if not cmd_input:
+                continue
+            cmd = cmd_input[0].lower()
+            args = cmd_input[1:]
+            asyncio.run_coroutine_threadsafe(handle_terminal_command(cmd, args), loop)
+        except Exception as e:
+            print(f"[ERROR] Terminal exception occurred: {e}")
+
+async def handle_terminal_command(cmd, args):
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        print("[WARN] Guild ID invalid or bot hasn't finished loading yet.")
+        return
+
+    if cmd == "help":
+        print("\n--- Available Terminal Commands ---")
+        print("  status                       - Shows active ticket count")
+        print("  closeall                     - Deletes all channels inside ticket category")
+        print("  say <chan_id> <content_str>  - Sends combined text || embed || image layout")
+        print("  stop                         - Gracefully logs the bot out")
+        print("-----------------------------------\n")
+        
+    elif cmd == "status":
+        category = guild.get_channel(TICKET_CATEGORY_ID)
+        ticket_count = len(category.text_channels) if category else 0
+        print(f"\n--- Bot Status ---\nActive Tickets Open: {ticket_count}\n------------------\n")
+        
+    elif cmd == "closeall":
+        category = guild.get_channel(TICKET_CATEGORY_ID)
+        if not category: return
+        for channel in category.text_channels:
+            if "order-" in channel.name or "report-" in channel.name:
+                await channel.delete()
+        print("[SYSTEM] Mass cleanup complete.")
+        
+    elif cmd == "say":
+        if len(args) < 2:
+            print("[ERROR] Usage: say [channel_id] [text || Title|Desc|#Hex || img_url]")
+            return
+            
+        try:
+            target_channel_id = int(args[0])
+        except ValueError:
+            print("[ERROR] Invalid Channel ID input.")
+            return
+            
+        channel = bot.get_channel(target_channel_id)
+        if not channel:
+            print("[ERROR] Channel not found or bot lacks access.")
+            return
+            
+        content_str = " ".join(args[1:])
+        success = await send_combined_message(channel, content_str)
+        if success:
+            print(f"[SUCCESS] Combined layout dispatched to #{channel.name}")
+        else:
+            print("[ERROR] Could not parse any valid text, embed or image details.")
+            
+    elif cmd == "stop":
+        await bot.close()
+        sys.exit(0)
+
+
+# --- DISCORD MODALS ---
+class CloseReasonModal(Modal):
+    def __init__(self, channel: discord.TextChannel):
+        super().__init__(title="Close Ticket")
+        self.channel = channel
+        self.reason_input = TextInput(label="Reason for closing", placeholder="Type reason here...", required=True)
+        self.add_item(self.reason_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.send_message(f"Closing channel... Reason: {self.reason_input.value}", ephemeral=True)
+        await asyncio.sleep(2)
+        await self.channel.delete()
+
+
+class OrderModal(Modal):
+    def __init__(self):
+        super().__init__(title="ordr !")
+        self.order_input = TextInput(label="~ Order ? ( ex. pets, n-tro, decor )", placeholder="Type item here...", required=True)
+        self.quantity_input = TextInput(label="~ Quantity? ( ex. 1, 2 )", placeholder="e.g., 2", required=True)
+        self.user_input = TextInput(label="~ Discord user", placeholder="Username", required=True)
+        
+        self.add_item(self.order_input)
+        self.add_item(self.quantity_input)
+        self.add_item(self.user_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        category = guild.get_channel(TICKET_CATEGORY_ID)
+        
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+
+        ticket_channel = await guild.create_text_channel(name=f"order-{interaction.user.name}", category=category, overwrites=overwrites)
+
+        # Ghost Ping
+        ghost_ping = await ticket_channel.send(content=interaction.user.mention)
+        await ghost_ping.delete()
+
+        content_message = (
+            "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀ order  h𝒶s  been  **placed** !   \n"
+            f"-# ⠀⠀⠀kindly  wait  for  assistance @soju  <:13_swans:1505512625432297502>\n"
+            "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀<:10_heart:1500183402341470333> ⠀‿‿ ‿‿ ‿‿ ⠀<:10_heart:1500183402341470333> \n"
+            "⠀⠀⠀\n"
+            f"⠀⠀⠀⠀⠀⠀user⠀⠀﹒⠀( {self.user_input.value} )\n"
+            f"⠀⠀⠀⠀⠀⠀item⠀⠀﹒⠀( {self.order_input.value} )\n"
+            f"⠀⠀⠀⠀⠀⠀qntity⠀﹒⠀( {self.quantity_input.value} )\n"
+            "⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⠀!⠀!⠀⠀__re__minder⠀﹒⠀ <:11_beadedbow:1505511713766768806>\n"
+            "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
+            "⠀⠀⠀⠀⠀read⠀[rules](https://discord.com/channels/1379011391494557706/1379011864788205689)⠀for⠀less⠀\n"
+            "⠀⠀⠀⠀⠀misunderstandings⠀, \n"
+            "⠀⠀⠀⠀⠀refund⠀fee⠀will⠀cost⠀\n"
+            "⠀⠀⠀⠀⠀**P35**⠀for⠀cancelled\n"
+            "⠀⠀⠀⠀⠀orders⠀.⠀no⠀**vouch**⠀\n"
+            "⠀⠀⠀⠀⠀=⠀no⠀future⠀transc\n"
+            "⠀⠀⠀⠀⠀"
+        )
+
+        staff_view = View(timeout=None)
+        staff_view.add_item(Button(label="Close With Reason", style=discord.ButtonStyle.secondary, custom_id="close_with_reason_order"))
+
+        async def close_callback(btn_interaction: discord.Interaction):
+            await btn_interaction.response.send_modal(CloseReasonModal(ticket_channel))
+        staff_view.children[0].callback = close_callback
+
+        await ticket_channel.send(content=content_message, view=staff_view)
+        await interaction.followup.send(f"Ticket created: {ticket_channel.mention}", ephemeral=True)
+
+
+# --- DISCORD BUTTONS ---
+class TicketCornerView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Order", style=discord.ButtonStyle.secondary, custom_id="persistent_order_btn")
+    async def order_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(OrderModal())
+
+    @discord.ui.button(label="Reports", style=discord.ButtonStyle.secondary, custom_id="persistent_report_btn")
+    async def report_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        category = guild.get_channel(TICKET_CATEGORY_ID)
+        
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        }
+
+        ticket_channel = await guild.create_text_channel(name=f"report-{interaction.user.name}", category=category, overwrites=overwrites)
+        
+        # Ghost Ping
+        ghost_ping = await ticket_channel.send(content=interaction.user.mention)
+        await ghost_ping.delete()
+
+        staff_view = View(timeout=None)
+        staff_view.add_item(Button(label="Close With Reason", style=discord.ButtonStyle.secondary, custom_id="close_with_reason_report"))
+        
+        async def close_callback(btn_interaction: discord.Interaction):
+            await btn_interaction.response.send_modal(CloseReasonModal(ticket_channel))
+        staff_view.children[0].callback = close_callback
+
+        await ticket_channel.send(content="**Report Ticket Opened**\nPlease explain your report issue below.", view=staff_view)
+        await interaction.followup.send(f"Report ticket created: {ticket_channel.mention}", ephemeral=True)
+
+
+# --- BOT RUNNERS ---
+async def main():
+    loop = asyncio.get_running_loop()
+    threading.Thread(target=start_terminal_loop, args=(loop,), daemon=True).start()
+    await bot.start(BOT_TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(main())
